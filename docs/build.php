@@ -289,7 +289,7 @@ function layout(array $page, array $meta): string
         <div class="shell">
         <aside class="sidebar">
             <a class="brand" href="index.html">
-                <img src="assets/logo-all.png" alt="phponwheels" width="1152" height="768">
+                <img src="assets/logo-1.png" alt="phponwheels" width="1274" height="625">
             </a>
             <p class="tagline">Developer documentation</p>
             <nav aria-label="Documentation">{$nav}</nav>
@@ -354,9 +354,7 @@ if ($missing !== []) {
 foreach ([
     __DIR__ . '/../public/favicon.svg' => OUT . '/assets/favicon.svg',
     __DIR__ . '/../public/icons/icon-32.png' => OUT . '/assets/favicon.png',
-    __DIR__ . '/../public/assets/img/logo-all.png' => OUT . '/assets/logo-all.png',
-    // Both variants: the wordmark is a fixed colour, so the page picks the one
-    // that contrasts with the reader's theme.
+    __DIR__ . '/../public/assets/img/logo-1.png' => OUT . '/assets/logo-1.png',
     __DIR__ . '/../brand/phponwheels-logo-on-dark.svg' => OUT . '/assets/logo-on-dark.svg',
     __DIR__ . '/../brand/phponwheels-logo-on-light.svg' => OUT . '/assets/logo-on-light.svg',
 ] as $from => $to) {

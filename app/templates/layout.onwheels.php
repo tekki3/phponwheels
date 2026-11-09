@@ -32,9 +32,8 @@
 <a class="skip" href="#content">Skip to content</a>
 
 <header class="masthead">
-    {# The lockup carries the name, so the link needs no separate text. #}
     <a class="brand" href="/">
-        <img src="/assets/img/logo-all.png" alt="phponwheels" width="1152" height="768">
+        <img src="/assets/img/logo-1.png" alt="phponwheels" width="1274" height="625">
     </a>
 
     <nav>

@@ -3,14 +3,14 @@
 The blue PHP elephant on wheels is the framework's identity. The supplied
 artwork is the master; generated assets must not restore the former orbit mark.
 
-## Masters
+## Single master
 
-- `../public/assets/img/logo-1.png`: elephant artwork, used for every icon and
-  the social preview. Preserve its proportions and complete silhouette.
-- `../public/assets/img/logo-all.png`: elephant and wordmark lockup, used in
-  the application and documentation mastheads.
+`../public/assets/img/logo-1.png` is the only logo source, used in application
+and documentation mastheads, every icon and the social preview. Preserve its
+colours, proportions and complete silhouette. Do not add a separate wordmark,
+monochrome logo or theme-specific artwork.
 
-Do not overwrite these originals when regenerating assets.
+Do not overwrite this original when regenerating assets.
 
 ## Regenerating
 
@@ -30,16 +30,16 @@ The renderer writes:
   artwork inside the central 80%-diameter safe circle.
 - `../public/favicon.ico`: 16, 32, 48, 64, 128 and 256px representations.
 - `../public/favicon.svg`: a self-contained SVG embedding the raster mark.
-- `phponwheels-mark*`: colour and monochrome mark exports from the same artwork.
-- `phponwheels-logo*`: lockup exports with a white backing to preserve the
-  supplied dark lettering in either theme.
+- `phponwheels-mark*`: exports from the same artwork. Legacy `mono` filenames
+  retain the full-colour logo for compatibility.
+- `phponwheels-logo*`: the same supplied logo in both theme exports.
 - `phponwheels-social-card.png`: a 1200x630 social preview.
 - `../public/assets/brand/`: published copies of the generated brand assets.
 
 The SVG files embed PNG data; they are not editable vector masters. Application
 and documentation pages use PNG favicons so the default content security policy
 does not need to allow embedded data URLs. The docs builder copies the favicon
-and supplied lockup into its standalone asset folder.
+and supplied logo into its standalone asset folder.
 
 ## Verification
 

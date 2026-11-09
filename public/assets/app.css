@@ -93,14 +93,9 @@ a { color: var(--accent); }
     backdrop-filter: saturate(160%) blur(12px);
 }
 
-/* The supplied lockup has dark lettering, so keep its backing light in either
-   theme. The image's alt text names the site to a screen reader. */
 .brand {
     display: inline-flex;
     align-items: center;
-    padding: 3px;
-    border-radius: 6px;
-    background: #fff;
     text-decoration: none;
 }
 .brand img { display: block; height: 48px; width: auto; }

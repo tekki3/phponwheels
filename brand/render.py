@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate brand assets from the supplied PNG masters with Pillow.
+"""Generate brand assets solely from logo-1.png with Pillow.
 
 Usage: python brand/render.py
 """
@@ -19,7 +19,6 @@ PUBLIC = ROOT / "public"
 ICONS = PUBLIC / "icons"
 SERVED = PUBLIC / "assets" / "brand"
 INK_DARK = (16, 19, 26, 255)
-INK_LIGHT = (230, 233, 239, 255)
 
 
 def square_icon(source: Image.Image, size: int, *, maskable: bool = False) -> Image.Image:
@@ -76,22 +75,16 @@ def main() -> None:
     write_svg(BRAND / "phponwheels-mark.svg", mark)
     write_svg(PUBLIC / "favicon.svg", mark)
 
-    for name, colour in (("light", INK_LIGHT), ("dark", INK_DARK)):
-        monochrome = Image.new("RGBA", mark.size, colour)
-        monochrome.putalpha(mark.getchannel("A"))
-        monochrome.save(BRAND / f"phponwheels-mark-mono-{name}.png", optimize=True)
-        if name == "dark":
-            write_svg(BRAND / "phponwheels-mark-mono.svg", monochrome)
+    # Keep legacy export paths usable without introducing another logo variant.
+    for name in ("light", "dark"):
+        mark.save(BRAND / f"phponwheels-mark-mono-{name}.png", optimize=True)
+    write_svg(BRAND / "phponwheels-mark-mono.svg", mark)
 
-    with Image.open(PUBLIC / "assets" / "img" / "logo-all.png") as original:
-        lockup = ImageOps.contain(original.convert("RGBA"), (576, 384), Image.Resampling.LANCZOS)
-    # The supplied wordmark has dark lettering; retain a light backing in both themes.
-    backed_lockup = Image.new("RGBA", lockup.size, (255, 255, 255, 255))
-    backed_lockup.alpha_composite(lockup)
-    write_svg(BRAND / "phponwheels-logo.svg", backed_lockup)
+    logo = ImageOps.contain(source, (576, 384), Image.Resampling.LANCZOS)
+    write_svg(BRAND / "phponwheels-logo.svg", logo)
     for theme in ("light", "dark"):
-        backed_lockup.save(BRAND / f"phponwheels-logo-on-{theme}.png", optimize=True)
-        write_svg(BRAND / f"phponwheels-logo-on-{theme}.svg", backed_lockup)
+        logo.save(BRAND / f"phponwheels-logo-on-{theme}.png", optimize=True)
+        write_svg(BRAND / f"phponwheels-logo-on-{theme}.svg", logo)
 
     card = Image.new("RGBA", (1200, 630), INK_DARK)
     banner = ImageOps.contain(source, card.size, Image.Resampling.LANCZOS)
@@ -102,7 +95,7 @@ def main() -> None:
     for path in BRAND.glob("*.svg"):
         shutil.copyfile(path, SERVED / path.name)
 
-    print("Generated icons and brand assets from the supplied PNG masters.")
+    print("Generated all icons and brand assets solely from logo-1.png.")
 
 
 if __name__ == "__main__":
