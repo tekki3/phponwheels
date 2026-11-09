@@ -280,7 +280,7 @@ function layout(array $page, array $meta): string
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>{$title} — phponwheels</title>
         <meta name="description" content="{$page['summary']}">
-        <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+        <link rel="icon" href="assets/favicon.png" type="image/png" sizes="32x32">
         <link rel="stylesheet" href="assets/docs.css">
         </head>
         <body>
@@ -353,6 +353,7 @@ if ($missing !== []) {
 // moved or served on its own.
 foreach ([
     __DIR__ . '/../public/favicon.svg' => OUT . '/assets/favicon.svg',
+    __DIR__ . '/../public/icons/icon-32.png' => OUT . '/assets/favicon.png',
     __DIR__ . '/../public/assets/img/logo-all.png' => OUT . '/assets/logo-all.png',
     // Both variants: the wordmark is a fixed colour, so the page picks the one
     // that contrasts with the reader's theme.
