@@ -1,0 +1,254 @@
+# phponwheels
+
+phponwheels is a PHP framework for building web applications. It connects URLs to
+your PHP code, renders HTML pages, and provides tools for forms, databases,
+sessions and authentication.
+
+**New to phponwheels? Start with the [step-by-step getting-started guide](docs/getting-started.html).**
+It explains the commands and takes you from installation to a page that greets
+a visitor by name. Open the HTML file in your browser after downloading this
+repository; no documentation server or build step is needed.
+
+Already have a running project? Follow the practical paths for
+[a JSON API](docs/getting-started.html#first-api),
+[verified accounts and MFA](docs/advanced-auth.html#new-project), or
+[a runnable AI script with OpenAI or Claude](docs/ai.html#first-answer).
+Each walkthrough links to its maintained reference for the details.
+
+## Requirements
+
+- **PHP 8.3 or newer**, with `pdo_sqlite`, `mbstring`, `fileinfo` and `sodium`
+- **[Composer](https://getcomposer.org/)**, PHP's package manager
+- A terminal, text editor and browser
+
+Check your tools with `php --version`, `composer --version` and `php -m`
+(which lists enabled extensions). The default database is SQLite: it stores
+data in a file, so you do not need to install a database server.
+
+Commands below use `php pow`, which works in Windows PowerShell, macOS and
+Linux. Other documentation uses `./pow` as the macOS/Linux shorthand.
+The built-in server uses PHP streams; `sockets` and `pcntl` are not required.
+
+## Starting your own project
+
+Run each command in your terminal, one at a time. Install the `phponwheels` project
+generator globally with Composer:
+
+```bash
+composer global require phponwheels/phponwheels
+composer global config bin-dir --absolute
+```
+
+The second command prints the directory containing the global `pow` command.
+Add that directory to your user's `PATH` if `pow` is not found, then open a
+new terminal. On Windows, add the printed directory to your account's **Path**
+environment variable. On macOS/Linux, add this line to your shell profile:
+
+```bash
+export PATH="$(composer global config bin-dir --absolute):$PATH"
+```
+
+To update the globally installed CLI later, run:
+
+```bash
+composer global update phponwheels/phponwheels
+```
+
+This updates the CLI within the version constraint Composer has stored for the
+global installation. It does not update applications you have already created:
+inside an existing application, run `composer update phponwheels/phponwheels` to update
+that application's framework dependency.
+
+Create a blank application in a new folder:
+
+```bash
+pow new my-app
+cd my-app
+composer install
+php pow migrate
+php pow serve --debug
+```
+
+Open <http://127.0.0.1:8080>. You should see **It works**.
+Leave the server terminal running; use a second terminal in `my-app` for other
+commands. Press **Ctrl+C** in the server terminal to stop it.
+
+- `pow new` writes the starter files, `.env` configuration and a unique
+  application key. Do not overwrite that `.env` with the example file.
+- `composer install` downloads dependencies into `vendor/`.
+- `migrate` applies database table changes. A blank project has no application
+  tables yet; that is expected.
+- `serve --debug` starts the local development server with error details.
+  **Never enable debug mode on a public deployment.**
+- `serve --https` enables local HTTPS with an automatically generated
+  self-signed certificate; open `https://localhost:8080` and expect a browser
+  trust warning. This is for development, not production.
+
+After creating the project, use its local `php pow` script, not the globally
+installed `pow`, for application commands. Run it from the folder containing
+`composer.json`. Create projects with `pow new`, not `composer create-project`.
+
+**Want a working demo instead?** Use `pow new my-demo --demo`, then run the
+same installation commands inside `my-demo`, adding `php pow db:seed` after
+`migrate`. The demo includes sign-in, notes, uploads and a self-check page.
+Its local demo login is `demo@example.test` / `correct-horse-battery`.
+To run one seeder instead of all of them, pass its filename without `.php`,
+for example `php pow db:seed 0001_demo_account`.
+
+## Build your first page
+
+The [getting-started tutorial](docs/getting-started.html#first-route) walks
+through complete, copyable examples:
+
+1. Add a **route** in `app/routes.php`: the rule connecting a URL to PHP code.
+2. Generate a **controller** with `php pow make:controller Greet --view`:
+   the class that handles a request.
+3. Register the controller's import and route manually; the generator prints
+   them but does not edit your routes.
+4. Edit the **template** in `app/templates/greet.onwheels.php`: the HTML displayed
+   in the browser.
+
+**Restart the server after changing routes, controllers, other PHP classes or
+`.env`.** It keeps the application in memory; refreshing the browser does not
+reload that code. Template-only edits appear on refresh when debug is enabled.
+
+## Where to put your code
+
+| Path | Purpose |
+| --- | --- |
+| `app/routes.php` | URL-to-handler rules |
+| `app/src/Controllers/` | Request-handling classes |
+| `app/templates/` | HTML templates, ending in `.onwheels.php` |
+| `app/bootstrap.php` | Startup configuration, services and middleware |
+| `database/migrations/` | Versioned database table changes |
+| `public/` | Browser-accessible assets and the production entrypoint |
+| `.env` | Local settings and secrets; never commit this file |
+| `storage/` | Sessions, compiled templates and the SQLite database |
+| `vendor/` | Composer-managed dependencies; do not edit |
+
+## Everyday commands
+
+Run these from your project folder, in a second terminal while the server runs:
+
+```bash
+php pow routes
+php pow make:controller Blog/Posts --view
+php pow make:form Contact --controllers
+php pow make:auth
+php pow make:migration create_posts_table
+php pow migrate
+php pow migrate:status
+php pow help
+```
+
+`routes` lists registered URLs, `make:*` generates starter files, and
+`migrate:status` shows applied and pending database changes. Generated files
+are yours to edit; read each command's output for wiring you need to add.
+
+In a blank project, `make:auth` adds login, email-verified registration,
+MFA/recovery codes, profiles and administrator user management. Configure
+SMTP and `APP_URL`, migrate, and register at `/register`. After verifying
+your email, `php pow auth:admin you@example.com` appoints the first admin.
+See [authentication scaffolding](docs/advanced-auth.html) for setup; it never
+overwrites files or replaces existing demo authentication.
+
+API support includes JWT access tokens, revocable personal Bearer tokens,
+`/api/v1` routes, database-backed rate limits and locally hosted Swagger UI.
+Create an endpoint with `php pow make:api Products`; its route and OpenAPI
+description load automatically. Use `--public` for a public endpoint, or
+`--method=POST --version=2` to choose another method/version. Run migrations
+and restart the server afterward. Blank projects use `make:auth` for token
+authentication; public endpoints do not require it.
+Visit `/api/docs` and manage personal tokens at `/account/tokens`.
+See [APIs](docs/api.html) for the framework APIs and security requirements.
+
+`php pow ui` opens a separate admin dashboard at <http://127.0.0.1:8081>
+for generators, migrations, mail and storage. **It has no login: keep the
+default loopback binding and never expose it publicly.**
+
+To run automated tests and static checks:
+
+```bash
+composer test
+composer stan
+```
+
+If a command fails, follow the error before continuing. The
+[troubleshooting table](docs/getting-started.html#troubleshooting) covers
+missing commands, dependencies, database extensions, busy ports and 404s.
+
+## Running this repository's demo
+
+If you cloned phponwheels itself, rather than creating an application:
+
+1. Run `composer install` in the repository root.
+2. If `.env` does not exist, copy `.env.example` to `.env` in your editor.
+   In PowerShell: `Copy-Item .env.example .env`; on macOS/Linux:
+   `cp .env.example .env`.
+3. If `APP_KEY` in `.env` is blank, run `php pow key:generate` and paste the
+   entire printed `base64:...` value after `APP_KEY=`. The command prints a key;
+   it does not write the file. Keep the key private, and do not replace an
+   existing key: previously encrypted data still needs it.
+4. Run:
+
+```bash
+php pow migrate
+php pow db:seed
+php pow serve --debug
+```
+
+Visit <http://127.0.0.1:8080> for the demo self-check page, and
+<http://127.0.0.1:8080/docs> for the documentation.
+
+## Learning more
+
+- [Getting started](docs/getting-started.html) — installation, your first page
+  and troubleshooting
+- [Forms](docs/forms.html) — inputs, validation and CSRF protection
+- [Database](docs/database.html), [migrations](docs/migrations.html) and
+  [models](docs/models.html) — storing and retrieving data
+- [Caching](docs/caching.html) — file storage, Redis and Memcached through one API
+- [Advanced authentication](docs/advanced-auth.html) — TOTP/recovery codes,
+  password resets, magic links, and explicitly linked Google/Entra accounts
+- [Documentation overview](docs/index.html) — all framework topics
+- [Deployment](docs/deployment.html) — production setup
+
+Generated projects do not include a `/docs` route or a copy of the
+documentation. In an installed project, the framework's docs are available
+at `vendor/phponwheels/phponwheels/docs/index.html`.
+
+## One application, four deployment targets
+
+| Target | Used for |
+| --- | --- |
+| `php pow serve` | Local development with phponwheels' own server |
+| FrankenPHP worker mode | Production |
+| nginx + PHP-FPM | Production |
+| Apache (mod_php or PHP-FPM) | Production |
+
+Your application runs unchanged across these targets. The built-in server and
+FrankenPHP keep the process alive across requests, so **never keep the current
+visitor's data in static properties or singleton services**. Use request-scoped
+services and phponwheels' sessions, not PHP's global session functions.
+
+Secure defaults include escaped template output, CSRF protection, safe
+sessions, password hashing, and a query builder that refuses an accidental
+`UPDATE` or `DELETE` without conditions.
+
+For work on the framework itself, [CLAUDE.md](CLAUDE.md) explains its design
+constraints and contributor expectations.
+
+## AI text generation
+
+Use `PhpOnWheels\Ai\Agent::using(OpenAI::class)->withKey($env->required('OPENAI_API_KEY'))`
+with `model(...)`, `prompt(...)` and `send()` for text. `withStreaming()->send()`
+returns text chunks; `withStreaming()->response()` returns a live HTTP stream
+from a controller. OpenAI, Anthropic and OpenAI-compatible local providers are
+supported through `ext-curl`. No provider is contacted automatically.
+See [AI agents](docs/ai.html) for configuration, costs, limits and worker-safe
+streaming examples.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Vendored Swagger UI retains its Apache-2.0
+license and notice in `public/assets/swagger/`.

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migrations — phponwheels</title>
+<meta name="description" content="Versioned schema changes, batches, rollbacks, and why down() is not optional.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+
+<div class="shell">
+<aside class="sidebar">
+    <a class="brand" href="index.html">
+        <picture>
+            <source srcset="assets/logo-on-dark.svg" media="(prefers-color-scheme: dark)">
+            <img src="assets/logo-on-light.svg" alt="phponwheels" width="157" height="32">
+        </picture>
+    </a>
+    <p class="tagline">Developer documentation</p>
+    <nav aria-label="Documentation"><p class="nav-group">Start here</p><ul><li><a href="index.html">Overview</a></li><li><a href="getting-started.html">Getting started</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="configuration.html">Configuration</a></li></ul><p class="nav-group">Handling requests</p><ul><li><a href="routing.html">Routing</a></li><li><a href="controllers.html">Controllers</a></li><li><a href="requests.html">Requests</a></li><li><a href="responses.html">Responses</a></li><li><a href="forms.html">Forms</a></li><li><a href="api.html">APIs</a></li></ul><p class="nav-group">Building blocks</p><ul><li><a href="container.html">Container</a></li><li><a href="middleware.html">Middleware</a></li><li><a href="templates.html">Templates</a></li></ul><p class="nav-group">Data</p><ul><li><a href="database.html">Database</a></li><li><a href="queries.html">Query builder</a></li><li><a href="migrations.html" class="current" aria-current="page">Migrations</a></li><li><a href="models.html">Models</a></li><li><a href="caching.html">Caching</a></li></ul><p class="nav-group">Users and safety</p><ul><li><a href="security.html">Security</a></li><li><a href="sessions.html">Sessions</a></li><li><a href="auth.html">Authentication</a></li><li><a href="advanced-auth.html">Advanced authentication</a></li><li><a href="validation.html">Validation</a></li><li><a href="uploads.html">File uploads</a></li><li><a href="encryption.html">Encryption and signing</a></li></ul><p class="nav-group">Talking outward</p><ul><li><a href="mail.html">Sending email</a></li><li><a href="ai.html">AI agents</a></li></ul><p class="nav-group">Operating it</p><ul><li><a href="cli.html">The phponwheels CLI</a></li><li><a href="admin-ui.html">The admin UI</a></li><li><a href="logging.html">Logging</a></li><li><a href="testing.html">Testing</a></li><li><a href="deployment.html">Deployment</a></li></ul></nav>
+</aside>
+
+<main id="content">
+    <article>
+        <h1>Migrations</h1>
+        <p class="summary">Versioned schema changes, batches, rollbacks, and why down() is not optional.</p>
+        <p>Migrations live in <code>database/migrations/</code>. Each file returns a <code>Migration</code>:</p>
+
+<figure class="code"><figcaption>PHP</figcaption><pre><code>
+<span class="tk-p">&lt;</span><span class="tk-p">?</span>php
+<span class="tk-comment">// database/migrations/0003_create_articles.php</span>
+<span class="tk-keyword">use</span> <span class="tk-class">PhpOnWheels\Database\Connection</span><span class="tk-p">;</span>
+<span class="tk-keyword">use</span> <span class="tk-class">PhpOnWheels\Database\Migration</span><span class="tk-p">;</span>
+
+<span class="tk-keyword">return</span> <span class="tk-keyword">new</span> <span class="tk-keyword">class</span> <span class="tk-keyword">implements</span> <span class="tk-class">Migration</span> <span class="tk-p">{</span>
+    <span class="tk-keyword">public</span> <span class="tk-keyword">function</span> <span class="tk-fn">up</span><span class="tk-p">(</span><span class="tk-class">Connection</span> <span class="tk-var">$database</span><span class="tk-p">)</span><span class="tk-p">:</span> <span class="tk-keyword">void</span>
+    <span class="tk-p">{</span>
+        <span class="tk-var">$database</span>-&gt;<span class="tk-fn">executeSchema</span><span class="tk-p">(</span><span class="tk-fn">sprintf</span><span class="tk-p">(</span>
+            <span class="tk-string">&#039;CREATE TABLE articles (
+                id %s,
+                title %s NOT NULL,
+                body %s NOT NULL,
+                created_at VARCHAR(40) NOT NULL
+            )&#039;</span><span class="tk-p">,</span>
+            <span class="tk-var">$database</span>-&gt;<span class="tk-fn">driver</span><span class="tk-p">(</span><span class="tk-p">)</span>-&gt;<span class="tk-fn">autoIncrementPrimaryKey</span><span class="tk-p">(</span><span class="tk-p">)</span><span class="tk-p">,</span>
+            <span class="tk-var">$database</span>-&gt;<span class="tk-fn">driver</span><span class="tk-p">(</span><span class="tk-p">)</span>-&gt;<span class="tk-fn">textType</span><span class="tk-p">(</span><span class="tk-p">)</span><span class="tk-p">,</span>
+            <span class="tk-var">$database</span>-&gt;<span class="tk-fn">driver</span><span class="tk-p">(</span><span class="tk-p">)</span>-&gt;<span class="tk-fn">textType</span><span class="tk-p">(</span><span class="tk-p">)</span><span class="tk-p">,</span>
+        <span class="tk-p">)</span><span class="tk-p">)</span><span class="tk-p">;</span>
+
+        <span class="tk-var">$database</span>-&gt;<span class="tk-fn">executeSchema</span><span class="tk-p">(</span><span class="tk-string">&#039;CREATE INDEX articles_author ON articles(author_id)&#039;</span><span class="tk-p">)</span><span class="tk-p">;</span>
+    <span class="tk-p">}</span>
+
+    <span class="tk-keyword">public</span> <span class="tk-keyword">function</span> <span class="tk-fn">down</span><span class="tk-p">(</span><span class="tk-class">Connection</span> <span class="tk-var">$database</span><span class="tk-p">)</span><span class="tk-p">:</span> <span class="tk-keyword">void</span>
+    <span class="tk-p">{</span>
+        <span class="tk-var">$database</span>-&gt;<span class="tk-fn">executeSchema</span><span class="tk-p">(</span><span class="tk-string">&#039;DROP TABLE articles&#039;</span><span class="tk-p">)</span><span class="tk-p">;</span>
+    <span class="tk-p">}</span>
+<span class="tk-p">}</span><span class="tk-p">;</span></code></pre></figure>
+
+<h2>Naming</h2>
+
+<p><code>&lt;digits&gt;_&lt;lowercase_words&gt;.php</code> — for example <code>0003_create_articles.php</code> or <code>20260810143000_add_articles_slug.php</code>.</p>
+
+<p>Ordering is by filename, so two developers adding migrations on separate branches get a deterministic order once merged, rather than one that depends on class discovery. A timestamp prefix makes collisions unlikely; a counter is fine for a small team.</p>
+
+<figure class="code"><figcaption>Output</figcaption><pre><code>
+MigrationFailed: Migration file &quot;AddArticles&quot; is unusable: names must look like
+  &quot;0001_create_users&quot; — digits, an underscore, then lowercase words</code></pre></figure>
+
+<h2>Running them</h2>
+
+<figure class="code"><figcaption>Shell</figcaption><pre><code>
+<span class="tk-p">$ </span>./pow migrate
+Applying pending migrations...
+  0003_create_articles
+  0004_add_articles_slug
+
+<span class="tk-p">$ </span>./pow migrate:status
+  applied   0001_create_users            batch 1
+  applied   0002_create_auth_attempts    batch 1
+  applied   0003_create_articles         batch 2
+  pending   0004_add_articles_slug
+
+<span class="tk-p">$ </span>./pow migrate:rollback
+Reversed 0003_create_articles
+
+<span class="tk-p">$ </span>./pow migrate:rollback --batches=2</code></pre></figure>
+
+<p><code>./pow serve</code> applies pending migrations first, as a development convenience. <strong>The production entrypoints never touch the schema</strong> — several workers booting at once would race. Run <code>./pow migrate</code> as a deploy step.</p>
+
+<h2>Batches</h2>
+
+<p>Everything applied by one <code>migrate</code> run shares a batch number. A rollback reverses the most recent batch — one deployment's worth of changes — rather than one arbitrary step.</p>
+
+<figure class="code"><figcaption>PHP</figcaption><pre><code>
+<span class="tk-p">&lt;</span><span class="tk-p">?</span>php
+<span class="tk-var">$migrator</span>-&gt;<span class="tk-fn">batches</span><span class="tk-p">(</span><span class="tk-p">)</span><span class="tk-p">;</span>   <span class="tk-comment">// [&#039;0001_create_users&#039; =&gt; 1, &#039;0003_create_articles&#039; =&gt; 2]</span></code></pre></figure>
+
+<p>Every migration in the batch is loaded and checked <em>before</em> anything is undone, so a batch containing a missing file fails without having half-rolled-back the rest.</p>
+
+<h2>Transactions</h2>
+
+<p>Each migration runs inside its own transaction. A failure leaves the schema as it was and the ledger unchanged, and stops the run — later migrations almost certainly assume this one's changes exist.</p>
+
+<div class="warn">
+<b>This depends on your engine</b>
+<p>SQLite and PostgreSQL support transactional DDL, so the guarantee holds. <strong>MySQL does not</strong>: a failed migration there can leave partial changes behind, and you will need to clean up by hand. Keep MySQL migrations small for that reason.</p>
+</div>
+
+<h2>down() is required</h2>
+
+<p>The interface demands it, so writing a migration forces a moment's thought about undoing it. When a change genuinely cannot be reversed, say so:</p>
+
+<figure class="code"><figcaption>PHP</figcaption><pre><code>
+<span class="tk-p">&lt;</span><span class="tk-p">?</span>php
+<span class="tk-keyword">use</span> <span class="tk-class">PhpOnWheels\Database\IrreversibleMigration</span><span class="tk-p">;</span>
+
+<span class="tk-keyword">return</span> <span class="tk-keyword">new</span> <span class="tk-keyword">class</span> <span class="tk-keyword">implements</span> <span class="tk-class">Migration</span> <span class="tk-p">{</span>
+    <span class="tk-keyword">public</span> <span class="tk-keyword">function</span> <span class="tk-fn">up</span><span class="tk-p">(</span><span class="tk-class">Connection</span> <span class="tk-var">$database</span><span class="tk-p">)</span><span class="tk-p">:</span> <span class="tk-keyword">void</span>
+    <span class="tk-p">{</span>
+        <span class="tk-var">$database</span>-&gt;<span class="tk-fn">executeSchema</span><span class="tk-p">(</span><span class="tk-string">&#039;ALTER TABLE users DROP COLUMN legacy_token&#039;</span><span class="tk-p">)</span><span class="tk-p">;</span>
+    <span class="tk-p">}</span>
+
+    <span class="tk-keyword">public</span> <span class="tk-keyword">function</span> <span class="tk-fn">down</span><span class="tk-p">(</span><span class="tk-class">Connection</span> <span class="tk-var">$database</span><span class="tk-p">)</span><span class="tk-p">:</span> <span class="tk-keyword">void</span>
+    <span class="tk-p">{</span>
+        <span class="tk-keyword">throw</span> <span class="tk-class">IrreversibleMigration</span>::<span class="tk-fn">because</span><span class="tk-p">(</span><span class="tk-string">&#039;the legacy_token values were not retained.&#039;</span><span class="tk-p">)</span><span class="tk-p">;</span>
+    <span class="tk-p">}</span>
+<span class="tk-p">}</span><span class="tk-p">;</span></code></pre></figure>
+
+<p>That records the decision in the migration itself, instead of an empty method that silently &ldquo;succeeds&rdquo; and leaves the schema wrong.</p>
+
+<h2>Data migrations</h2>
+
+<p>Schema and data change together in one transaction:</p>
+
+<figure class="code"><figcaption>PHP</figcaption><pre><code>
+<span class="tk-p">&lt;</span><span class="tk-p">?</span>php
+<span class="tk-keyword">public</span> <span class="tk-keyword">function</span> <span class="tk-fn">up</span><span class="tk-p">(</span><span class="tk-class">Connection</span> <span class="tk-var">$database</span><span class="tk-p">)</span><span class="tk-p">:</span> <span class="tk-keyword">void</span>
+<span class="tk-p">{</span>
+    <span class="tk-var">$database</span>-&gt;<span class="tk-fn">executeSchema</span><span class="tk-p">(</span><span class="tk-fn">sprintf</span><span class="tk-p">(</span>
+        <span class="tk-string">&#039;ALTER TABLE users ADD COLUMN display_name %s&#039;</span><span class="tk-p">,</span>
+        <span class="tk-var">$database</span>-&gt;<span class="tk-fn">driver</span><span class="tk-p">(</span><span class="tk-p">)</span>-&gt;<span class="tk-fn">textType</span><span class="tk-p">(</span><span class="tk-p">)</span><span class="tk-p">,</span>
+    <span class="tk-p">)</span><span class="tk-p">)</span><span class="tk-p">;</span>
+
+    <span class="tk-keyword">foreach</span> <span class="tk-p">(</span><span class="tk-var">$database</span>-&gt;<span class="tk-fn">select</span><span class="tk-p">(</span><span class="tk-string">&#039;SELECT id, email FROM users&#039;</span><span class="tk-p">)</span> <span class="tk-keyword">as</span> <span class="tk-var">$user</span><span class="tk-p">)</span> <span class="tk-p">{</span>
+        <span class="tk-var">$database</span>-&gt;<span class="tk-fn">execute</span><span class="tk-p">(</span>
+            <span class="tk-string">&#039;UPDATE users SET display_name = :name WHERE id = :id&#039;</span><span class="tk-p">,</span>
+            <span class="tk-p">[</span>
+                <span class="tk-string">&#039;name&#039;</span> =&gt; <span class="tk-fn">explode</span><span class="tk-p">(</span><span class="tk-string">&#039;@&#039;</span><span class="tk-p">,</span> (string) <span class="tk-var">$user</span><span class="tk-p">[</span><span class="tk-string">&#039;email&#039;</span><span class="tk-p">]</span><span class="tk-p">)</span><span class="tk-p">[</span><span class="tk-num">0</span><span class="tk-p">]</span><span class="tk-p">,</span>
+                <span class="tk-string">&#039;id&#039;</span> =&gt; <span class="tk-var">$user</span><span class="tk-p">[</span><span class="tk-string">&#039;id&#039;</span><span class="tk-p">]</span><span class="tk-p">,</span>
+            <span class="tk-p">]</span><span class="tk-p">,</span>
+        <span class="tk-p">)</span><span class="tk-p">;</span>
+    <span class="tk-p">}</span>
+<span class="tk-p">}</span></code></pre></figure>
+
+<p>For a large table, prefer a single <code>UPDATE</code> over a loop — it is one statement instead of one per row.</p>
+
+<h2>The ledger</h2>
+
+<p>Applied migrations are recorded in <code>phponwheels_migrations</code>:</p>
+
+<div class="scroller">
+<table>
+<thead><tr><th>Column</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>name</code></td><td>Filename without <code>.php</code>. Primary key.</td></tr>
+<tr><td><code>batch</code></td><td>Which run applied it.</td></tr>
+<tr><td><code>applied_at</code></td><td>UTC timestamp.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The table is created on demand, so a fresh database needs no setup step.</p>
+
+<h2>Using the Migrator directly</h2>
+
+<figure class="code"><figcaption>PHP</figcaption><pre><code>
+<span class="tk-p">&lt;</span><span class="tk-p">?</span>php
+<span class="tk-keyword">use</span> <span class="tk-class">PhpOnWheels\Database\Migrator</span><span class="tk-p">;</span>
+
+<span class="tk-var">$migrator</span> <span class="tk-p">=</span> <span class="tk-keyword">new</span> <span class="tk-fn">Migrator</span><span class="tk-p">(</span>
+    <span class="tk-var">$database</span><span class="tk-p">,</span>
+    <span class="tk-var">$root</span> <span class="tk-p">.</span> <span class="tk-string">&#039;/database/migrations&#039;</span><span class="tk-p">,</span>
+    report<span class="tk-p">:</span> <span class="tk-keyword">static</span> <span class="tk-keyword">fn</span> <span class="tk-p">(</span><span class="tk-keyword">string</span> <span class="tk-var">$line</span><span class="tk-p">)</span> =&gt; <span class="tk-keyword">print</span><span class="tk-p">(</span><span class="tk-var">$line</span> <span class="tk-p">.</span> <span class="tk-class">PHP_EOL</span><span class="tk-p">)</span><span class="tk-p">,</span>
+<span class="tk-p">)</span><span class="tk-p">;</span>
+
+<span class="tk-var">$migrator</span>-&gt;<span class="tk-fn">pending</span><span class="tk-p">(</span><span class="tk-p">)</span><span class="tk-p">;</span>     <span class="tk-comment">// list&lt;string&gt;</span>
+<span class="tk-var">$migrator</span>-&gt;<span class="tk-fn">applied</span><span class="tk-p">(</span><span class="tk-p">)</span><span class="tk-p">;</span>     <span class="tk-comment">// list&lt;string&gt;</span>
+<span class="tk-var">$migrator</span>-&gt;<span class="tk-fn">available</span><span class="tk-p">(</span><span class="tk-p">)</span><span class="tk-p">;</span>   <span class="tk-comment">// every file, in run order</span>
+<span class="tk-var">$migrator</span>-&gt;<span class="tk-fn">migrate</span><span class="tk-p">(</span><span class="tk-p">)</span><span class="tk-p">;</span>     <span class="tk-comment">// returns what it applied</span>
+<span class="tk-var">$migrator</span>-&gt;<span class="tk-fn">rollback</span><span class="tk-p">(</span><span class="tk-num">1</span><span class="tk-p">)</span><span class="tk-p">;</span>   <span class="tk-comment">// returns what it reversed</span></code></pre></figure>
+
+<p>This is what makes migrations testable — run them against an in-memory SQLite database in a test and assert the resulting schema.</p>
+
+<h2>Seeding</h2>
+
+<p>Seed data is not a migration. Put PHP files in <code>database/seeders/</code>, each returning a <code>PhpOnWheels\Database\Seeder</code>. Run migrations first, then seed explicitly:</p>
+
+<p>Generate a starter with <code>./pow make:seed 0002_categories</code>, then edit its <code>run()</code> method. Names become filenames exactly; use a numeric prefix to choose the order. Existing files are refused unless <code>--force</code> is passed.</p>
+
+<figure class="code"><figcaption>Shell</figcaption><pre><code>
+<span class="tk-p">$ </span>./pow db:seed
+Seeded 0001_demo_account</code></pre></figure>
+
+<p>Files run in filename order on <em>every invocation</em>, with no ledger or automatic rollback command. Each seeder runs in its own transaction. If it fails, its data writes roll back and later seeders do not run; earlier successful seeders remain committed. All files are loaded and checked before the first seeder runs. Keep file-level code free of side effects and put writes inside <code>run()</code>. Use seeders for data, not DDL: MySQL schema changes can commit implicitly.</p>
+
+<p>For example, <code>database/seeders/0001_starter_note.php</code>:</p>
+
+<figure class="code"><figcaption>PHP</figcaption><pre><code>
+<span class="tk-p">&lt;</span><span class="tk-p">?</span>php
+<span class="tk-keyword">declare</span><span class="tk-p">(</span>strict_types<span class="tk-p">=</span><span class="tk-num">1</span><span class="tk-p">)</span><span class="tk-p">;</span>
+
+<span class="tk-keyword">use</span> <span class="tk-class">PhpOnWheels\Database\Connection</span><span class="tk-p">;</span>
+<span class="tk-keyword">use</span> <span class="tk-class">PhpOnWheels\Database\Seeder</span><span class="tk-p">;</span>
+
+<span class="tk-keyword">return</span> <span class="tk-keyword">new</span> <span class="tk-keyword">class</span> <span class="tk-keyword">implements</span> <span class="tk-class">Seeder</span> <span class="tk-p">{</span>
+    <span class="tk-keyword">public</span> <span class="tk-keyword">function</span> <span class="tk-fn">run</span><span class="tk-p">(</span><span class="tk-class">Connection</span> <span class="tk-var">$database</span><span class="tk-p">)</span><span class="tk-p">:</span> <span class="tk-keyword">void</span>
+    <span class="tk-p">{</span>
+        <span class="tk-keyword">if</span> <span class="tk-p">(</span><span class="tk-var">$database</span>-&gt;<span class="tk-fn">query</span><span class="tk-p">(</span><span class="tk-string">&#039;notes&#039;</span><span class="tk-p">)</span>-&gt;<span class="tk-fn">where</span><span class="tk-p">(</span><span class="tk-string">&#039;title&#039;</span><span class="tk-p">,</span> <span class="tk-string">&#039;=&#039;</span><span class="tk-p">,</span> <span class="tk-string">&#039;Welcome&#039;</span><span class="tk-p">)</span>-&gt;<span class="tk-fn">first</span><span class="tk-p">(</span><span class="tk-p">)</span> === <span class="tk-keyword">null</span><span class="tk-p">)</span> <span class="tk-p">{</span>
+            <span class="tk-var">$database</span>-&gt;<span class="tk-fn">query</span><span class="tk-p">(</span><span class="tk-string">&#039;notes&#039;</span><span class="tk-p">)</span>-&gt;<span class="tk-fn">insert</span><span class="tk-p">(</span><span class="tk-p">[</span>
+                <span class="tk-string">&#039;title&#039;</span> =&gt; <span class="tk-string">&#039;Welcome&#039;</span><span class="tk-p">,</span>
+                <span class="tk-string">&#039;body&#039;</span> =&gt; <span class="tk-string">&#039;Your first note.&#039;</span><span class="tk-p">,</span>
+                <span class="tk-string">&#039;created_at&#039;</span> =&gt; <span class="tk-fn">gmdate</span><span class="tk-p">(</span><span class="tk-string">&#039;c&#039;</span><span class="tk-p">)</span><span class="tk-p">,</span>
+            <span class="tk-p">]</span><span class="tk-p">)</span><span class="tk-p">;</span>
+        <span class="tk-p">}</span>
+    <span class="tk-p">}</span>
+<span class="tk-p">}</span><span class="tk-p">;</span></code></pre></figure>
+
+<p>Make each seeder idempotent by checking for existing data rather than inserting duplicates or overwriting user changes. The demo seeder creates <code>demo@example.test</code> / <code>correct-horse-battery</code> only if that account is absent. These are local demo credentials, not production credentials. Blank projects have an empty seed directory; an empty or absent directory prints <code>Nothing to seed.</code>. Seeders never run automatically during boot or <code>serve</code>.</p>
+    </article>
+    <nav class="pager"><a href="queries.html"><span>Previous</span>Query builder</a><a class="next" href="models.html"><span>Next</span>Models</a></nav>
+    <footer class="site-footer">
+        <p>phponwheels documentation · generated by <code>php docs/build.php</code></p>
+    </footer>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,1013 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * The pow CLI.
+ *
+ * `pow serve` runs the framework's own HTTP server — the development target.
+ * It is a long-lived process by design, matching FrankenPHP's process model so
+ * that worker-safety problems surface locally.
+ */
+
+use PhpOnWheels\Database\SeedRunner;
+use PhpOnWheels\Admin\AdminApplication;
+use PhpOnWheels\Cache\CacheFactory;
+use PhpOnWheels\Cache\CacheFailed;
+use PhpOnWheels\Config\Environment;
+use PhpOnWheels\Config\InvalidEnvFile;
+use PhpOnWheels\Config\MissingConfiguration;
+use PhpOnWheels\Console\ClassMaker;
+use PhpOnWheels\Console\AuthMaker;
+use PhpOnWheels\Console\AuthAdmin;
+use PhpOnWheels\Console\ApiMaker;
+use PhpOnWheels\Console\ControllerMaker;
+use PhpOnWheels\Console\FormMaker;
+use PhpOnWheels\Console\Lifetime;
+use PhpOnWheels\Console\MiddlewareMaker;
+use PhpOnWheels\Console\MigrationMaker;
+use PhpOnWheels\Console\ModelMaker;
+use PhpOnWheels\Console\Scaffold;
+use PhpOnWheels\Console\SeedMaker;
+use PhpOnWheels\Console\Variant;
+use PhpOnWheels\Crypto\Key;
+use PhpOnWheels\Database\Connection;
+use PhpOnWheels\Database\ConnectionFailed;
+use PhpOnWheels\Database\Migrator;
+use PhpOnWheels\Database\SeedFailed;
+use PhpOnWheels\Kernel\Application;
+use PhpOnWheels\Mail\MailFailed;
+use PhpOnWheels\Mail\MailStatus;
+use PhpOnWheels\Mail\Message;
+use PhpOnWheels\Mail\PersistingMailer;
+use PhpOnWheels\Routing\Exception\InvalidRoutePattern;
+use PhpOnWheels\Sapi\DevelopmentCertificate;
+use PhpOnWheels\Sapi\OnWheelsServer;
+use PhpOnWheels\Session\FileSessionStore;
+
+if (PHP_SAPI !== 'cli') {
+    fwrite(STDERR, 'pow must be run from the command line.' . PHP_EOL);
+    exit(1);
+}
+
+$root = __DIR__;
+
+foreach ([$root . '/vendor/autoload.php', $root . '/../../autoload.php'] as $candidate) {
+    if (is_file($candidate)) {
+        require $candidate;
+        break;
+    }
+}
+
+if (!class_exists(Application::class)) {
+    fwrite(STDERR, 'Dependencies are not installed. Run: composer install' . PHP_EOL);
+    exit(1);
+}
+
+/**
+ * Extracts `--name=value` and `--flag` arguments.
+ *
+ * @param array<mixed> $argv raw arguments, whose element types PHP does not guarantee
+ * @return array<string, string>
+ */
+$parseOptions = static function (array $argv): array {
+    $options = [];
+
+    foreach ($argv as $argument) {
+        if (!is_string($argument) || !str_starts_with($argument, '--')) {
+            continue;
+        }
+
+        $pair = substr($argument, 2);
+        $separator = strpos($pair, '=');
+
+        if ($separator === false) {
+            $options[$pair] = '1';
+            continue;
+        }
+
+        $options[substr($pair, 0, $separator)] = substr($pair, $separator + 1);
+    }
+
+    return $options;
+};
+
+$usage = <<<TXT
+pow
+
+Commands:
+  pow make:auth
+      Generate login, verified registration, MFA, profiles and administrator
+      user management. Never overwrites existing files.
+  pow make:api <Name> [--method=GET] [--version=1] [--public]
+      Generate a JSON endpoint, automatically register its versioned route
+      and include it in Swagger. Bearer authentication is required unless --public.
+  pow auth:admin <email>
+      Grant administrator access to an existing verified, active scaffolded account.
+  pow new <directory> [--demo] [--force]
+      Create a blank project, or a demo project with --demo; --force allows
+      writing into an existing directory.
+  pow key:generate
+      Generate and print a new application key; it does not change any files.
+  pow make:class <Name> [--singleton|--scoped] [--force]
+      Generate an App\ class. Autowired is the default lifetime; the flags
+      register it as a singleton or request-scoped service.
+  pow make:controller <Name> [--view] [--force]
+      Generate a controller and print its route registration; --view also
+      creates a matching template.
+  pow make:form <Name> [--fields=a:text,b:email] [--captcha]
+                         [--no-honeypot] [--controllers] [--force]
+      Generate a form with honeypot protection by default. Choose fields,
+      optionally add a captcha or generate its controllers and template.
+  pow make:middleware <Name> [--force]
+      Generate middleware and print its registration; add it to the
+      middleware list yourself to choose its position.
+  pow make:migration <name> [--table=x] [--sequential] [--force]
+      Generate a migration. Filenames use timestamps by default; --sequential
+      uses a numbered prefix, and --table sets the target table.
+  pow make:seed <name> [--force]
+      Generate a database seeder.
+  pow make:model <Name> [--table=x] [--fields=a:string,b:int] [--force]
+      Generate a typed model and its row mappings; --table overrides the
+      inferred table name.
+  pow serve [--host=127.0.0.1] [--port=8080] [--debug] [--https]
+      Apply pending migrations and start the development server. --debug
+      enables detailed errors and template recompilation. --https enables
+      local HTTPS with an automatically generated self-signed certificate.
+  pow ui [--host=127.0.0.1] [--port=8081] [--debug]
+      Start the local admin dashboard for migrations, mail, routes, seeders,
+      sessions, storage and generators. It has no login.
+  pow routes
+      Print the application's compiled route table.
+  pow migrate
+      Apply all pending database migrations.
+  pow migrate:status
+      Show available migrations and whether each has been applied.
+  pow migrate:rollback [--batches=1]
+      Roll back the most recent batch, or the requested number of batches.
+  pow db:seed [name] [--seed=name]
+      Run all database seeders, or only the named seeder.
+  pow mail:test --to=x@example.test [--from=x@example.test]
+      Send a test message (or queue it when MAIL_QUEUE=true). Uses the
+      configured sender unless --from is provided.
+  pow mail:list [--status=sent|failed|pending] [--limit=20]
+      List logged mail, optionally filtered by status and limited in count.
+  pow mail:send-pending [--limit=50]
+      Deliver queued messages up to the requested limit.
+  pow mail:resend <id>|--failed [--limit=50]
+      Retry one failed message by id, or retry failed messages up to the limit.
+  pow cache:clear
+      Clear application data in the configured cache backend and namespace.
+  pow storage:clear
+      Remove compiled templates; they are rebuilt automatically when needed.
+  pow sessions:gc
+      Delete expired session files.
+  pow help
+      Show this command list.
+
+Scaffolded projects do not include the framework documentation.
+
+TXT;
+
+// Read through $_SERVER rather than the $argv global, which only exists when
+// register_argc_argv is on. This script is a SAPI boundary, so superglobal
+// access belongs here.
+$rawArguments = $_SERVER['argv'] ?? [];
+$arguments = is_array($rawArguments) ? array_slice($rawArguments, 1) : [];
+$command = is_string($arguments[0] ?? null) ? $arguments[0] : 'help';
+$options = $parseOptions($arguments);
+
+// Set in the real environment rather than written to the file, which is both
+// non-destructive and consistent with the precedence rule: what the process
+// was given always beats what .env says.
+if (isset($options['debug'])) {
+    putenv('APP_DEBUG=true');
+}
+
+$bootstrap = $root . '/app/bootstrap.php';
+
+if (!is_file($bootstrap)) {
+    fwrite(STDERR, sprintf('No application bootstrap at %s.', $bootstrap) . PHP_EOL);
+    exit(1);
+}
+
+try {
+    switch ($command) {
+    case 'new':
+        // Positional, and the only command that does not boot an application —
+        // there is no application yet.
+        $directory = null;
+        foreach (array_slice($arguments, 1) as $argument) {
+            if (is_string($argument) && !str_starts_with($argument, '--')) {
+                $directory = $argument;
+                break;
+            }
+        }
+
+        if ($directory === null) {
+            fwrite(STDERR, 'Which directory? Try: pow new my-app' . PHP_EOL);
+            exit(1);
+        }
+
+        $variant = isset($options['demo']) ? Variant::Demo : Variant::Blank;
+
+        $scaffold = new Scaffold($root, static function (string $line): void {
+            fwrite(STDERR, $line . PHP_EOL);
+        });
+
+        try {
+            $created = $scaffold->create($directory, $variant, force: isset($options['force']));
+        } catch (RuntimeException $e) {
+            // Refusing to write into an occupied directory is the expected
+            // outcome, not a crash — say so without a stack trace.
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+
+        printf("Created %s — %s\n\n", $directory, $variant->describe());
+        printf("  %d files written\n\n", count($created));
+        echo "Next:\n";
+        printf("  cd %s\n", $directory);
+        echo "  composer install\n";
+        echo "  ./pow migrate\n";
+        echo "  ./pow serve\n";
+        exit(0);
+
+    case 'key:generate':
+        // Writes nothing: printing it keeps the command safe to run anywhere,
+        // and makes it obvious that the value belongs in configuration the
+        // deployment supplies rather than in a file someone might commit.
+        echo Key::generate()->exportForConfiguration() . PHP_EOL;
+        exit(0);
+
+    case 'make:auth':
+        try {
+            if ($options !== [] || count($arguments) !== 1) {
+                throw new InvalidArgumentException('Usage: pow make:auth (no options; existing files are never overwritten).');
+            }
+            $files = (new AuthMaker($root))->create();
+            printf("Generated authentication: %d files.\n\n", count($files));
+            echo "New blank projects load app/auth.php automatically.\n";
+            echo "For older projects, add inside the boot callback, after service bindings:\n  " . AuthMaker::WIRING . "\n\n";
+            echo "Next: configure APP_URL and SMTP, run pow migrate, then visit /register.\n";
+            echo "After verifying your account: pow auth:admin your@email.example\n";
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+        exit(0);
+
+    case 'make:api':
+        try {
+            $positional = array_values(array_filter(array_slice($arguments, 1),
+                static fn ($value): bool => is_string($value) && !str_starts_with($value, '--')));
+            if (count($positional) !== 1
+                || array_diff(array_keys($options), ['method', 'version', 'public']) !== []
+                || (isset($options['public']) && $options['public'] !== '1')) {
+                throw new InvalidArgumentException('Usage: pow make:api <Name> [--method=GET] [--version=1] [--public]');
+            }
+            $method = \PhpOnWheels\Http\Method::tryFrom(strtoupper($options['method'] ?? 'GET'));
+            $version = filter_var($options['version'] ?? '1', FILTER_VALIDATE_INT);
+            if ($method === null || $version === false) {
+                throw new InvalidArgumentException('Use a valid HTTP method and an integer API version.');
+            }
+            $made = (new ApiMaker($root))->create($positional[0], $method, $version, isset($options['public']));
+            printf("Created %s\nCreated %s\n\n%s %s — automatically registered.\n",
+                $made->controllerPath, $made->declarationPath, $method->value, $made->url);
+            echo "Edit the controller to return your data; edit the declaration for its OpenAPI schema.\n";
+            if (!isset($options['public'])) {
+                echo "Bearer-protected: in a blank project, run pow make:auth once to provide token authentication.\n";
+            }
+            echo "Next: pow migrate, restart the server, then open /api/docs.\n";
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+        exit(0);
+
+    case 'auth:admin':
+        try {
+            if (count($arguments) !== 2 || !is_string($arguments[1]) || $options !== []) {
+                throw new InvalidArgumentException('Usage: pow auth:admin <verified-email>');
+            }
+            $env = Environment::load($root . '/.env');
+            $database = Connection::connect(\PhpOnWheels\Database\DatabaseSettings::fromEnvironment($env, $root));
+            (new AuthAdmin($database))->promote($arguments[1]);
+            echo "Administrator access granted. Sign in again to refresh your session.\n";
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+        exit(0);
+
+    case 'make:class':
+        // Generates source; there is no reason to boot the application first.
+        $name = null;
+        foreach (array_slice($arguments, 1) as $argument) {
+            if (is_string($argument) && !str_starts_with($argument, '--')) {
+                $name = $argument;
+                break;
+            }
+        }
+
+        if ($name === null) {
+            fwrite(STDERR, 'Which class? Try: pow make:class Notes/NoteRepository' . PHP_EOL);
+            exit(1);
+        }
+
+        try {
+            $made = (new ClassMaker($root, static function (string $line): void {
+                echo $line . PHP_EOL;
+            }))->create(
+                $name,
+                // Mutually exclusive, and refused as a pair inside the enum so
+                // this script and the scaffolded one cannot disagree about it.
+                Lifetime::fromFlags(
+                    singleton: isset($options['singleton']),
+                    scoped: isset($options['scoped']),
+                ),
+                force: isset($options['force']),
+            );
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+
+        printf("\n%s — %s\n", $made->className, $made->lifetime->describe());
+
+        // Printed rather than written, for the reason make:controller prints its
+        // route line: editing a file the developer owns means parsing and
+        // re-emitting their code.
+        if ($made->registrationSnippet !== null) {
+            echo PHP_EOL . 'Add to app/bootstrap.php:' . PHP_EOL . PHP_EOL;
+            echo '  ' . $made->importSnippet . PHP_EOL;
+            echo '  ' . $made->registrationSnippet . PHP_EOL;
+        }
+
+        echo PHP_EOL . 'Inject it where you need it:' . PHP_EOL . PHP_EOL;
+        echo '  ' . $made->importSnippet . PHP_EOL;
+        echo '  ' . $made->injectionSnippet . PHP_EOL;
+        exit(0);
+
+    case 'make:controller':
+        // Generates source; there is no reason to boot the application first.
+        $name = null;
+        foreach (array_slice($arguments, 1) as $argument) {
+            if (is_string($argument) && !str_starts_with($argument, '--')) {
+                $name = $argument;
+                break;
+            }
+        }
+
+        if ($name === null) {
+            fwrite(STDERR, 'Which controller? Try: pow make:controller Home' . PHP_EOL);
+            exit(1);
+        }
+
+        try {
+            $made = (new ControllerMaker($root, static function (string $line): void {
+                echo $line . PHP_EOL;
+            }))->create($name, withView: isset($options['view']), force: isset($options['force']));
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+
+        // Routes are not edited automatically: rewriting a file the developer
+        // owns means parsing and re-emitting their code, and getting that
+        // subtly wrong is worse than leaving one line to paste.
+        echo PHP_EOL . 'Add to app/routes.php:' . PHP_EOL . PHP_EOL;
+        echo '  ' . $made->importSnippet . PHP_EOL;
+        echo '  ' . $made->routeSnippet . PHP_EOL;
+        exit(0);
+
+    case 'make:form':
+        // Generates source; there is no reason to boot the application first.
+        $name = null;
+        foreach (array_slice($arguments, 1) as $argument) {
+            if (is_string($argument) && !str_starts_with($argument, '--')) {
+                $name = $argument;
+                break;
+            }
+        }
+
+        if ($name === null) {
+            fwrite(STDERR, 'Which form? Try: pow make:form Contact --controllers' . PHP_EOL);
+            exit(1);
+        }
+
+        try {
+            $made = (new FormMaker($root, static function (string $line): void {
+                echo $line . PHP_EOL;
+            }))->create(
+                $name,
+                fields: $options['fields'] ?? null,
+                captcha: isset($options['captcha']),
+                // On unless turned off. A protection that has to be added after
+                // the fact is one that gets added after the first spam run.
+                honeypot: !isset($options['no-honeypot']),
+                withControllers: isset($options['controllers']),
+                force: isset($options['force']),
+            );
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+
+        printf(
+            "\n%s — %d fields: %s\n",
+            $made->className,
+            count($made->fieldNames),
+            implode(', ', $made->fieldNames),
+        );
+
+        if ($made->routeSnippets !== []) {
+            echo PHP_EOL . 'Add to app/routes.php:' . PHP_EOL . PHP_EOL;
+
+            foreach ([...$made->importSnippets, ...$made->routeSnippets] as $line) {
+                echo '  ' . $line . PHP_EOL;
+            }
+        } else {
+            echo PHP_EOL . 'Build it from a controller:' . PHP_EOL . PHP_EOL;
+            echo '  ' . sprintf('use %s;', $made->className) . PHP_EOL;
+            echo '  ' . $made->injectionSnippet . PHP_EOL;
+            echo PHP_EOL . 'Or pass --controllers to have the two pages written too.' . PHP_EOL;
+        }
+
+        exit(0);
+
+    case 'make:middleware':
+        // Generates source; there is no reason to boot the application first.
+        $name = null;
+        foreach (array_slice($arguments, 1) as $argument) {
+            if (is_string($argument) && !str_starts_with($argument, '--')) {
+                $name = $argument;
+                break;
+            }
+        }
+
+        if ($name === null) {
+            fwrite(STDERR, 'Which middleware? Try: pow make:middleware RequestId' . PHP_EOL);
+            exit(1);
+        }
+
+        try {
+            $made = (new MiddlewareMaker($root, static function (string $line): void {
+                echo $line . PHP_EOL;
+            }))->create($name, force: isset($options['force']));
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+
+        // Not inserted automatically: where in the list it goes is meaning,
+        // not plumbing — session before CSRF, logging outermost — and that is
+        // a decision only the developer can make.
+        printf("\n%s\n", $made->className);
+        echo PHP_EOL . 'Add to the $app->middleware(...) list in app/bootstrap.php:' . PHP_EOL . PHP_EOL;
+        echo '  ' . $made->importSnippet . PHP_EOL;
+        echo '  ' . $made->registrationSnippet . PHP_EOL;
+        exit(0);
+
+    case 'make:migration':
+        // Generates source; there is no reason to boot the application first.
+        $name = null;
+        foreach (array_slice($arguments, 1) as $argument) {
+            if (is_string($argument) && !str_starts_with($argument, '--')) {
+                $name = $argument;
+                break;
+            }
+        }
+
+        if ($name === null) {
+            fwrite(STDERR, 'Which migration? Try: pow make:migration create_articles_table' . PHP_EOL);
+            exit(1);
+        }
+
+        try {
+            $migration = (new MigrationMaker($root, static function (string $line): void {
+                echo $line . PHP_EOL;
+            }))->create(
+                $name,
+                table: $options['table'] ?? null,
+                sequential: isset($options['sequential']),
+                force: isset($options['force']),
+            );
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+
+        echo PHP_EOL . 'Edit it, then run: pow migrate' . PHP_EOL;
+        exit(0);
+
+    case 'make:seed':
+        $name = null;
+        foreach (array_slice($arguments, 1) as $argument) {
+            if (is_string($argument) && !str_starts_with($argument, '--')) {
+                $name = $argument;
+                break;
+            }
+        }
+
+        if ($name === null) {
+            fwrite(STDERR, 'Which seed? Try: pow make:seed 0002_categories' . PHP_EOL);
+            exit(1);
+        }
+
+        try {
+            $path = (new SeedMaker($root))->create($name, force: isset($options['force']));
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+
+        echo 'Created ' . $path . PHP_EOL;
+        echo PHP_EOL . 'Edit it, then run: pow db:seed' . PHP_EOL;
+        exit(0);
+
+    case 'make:model':
+        // Generates source; there is no reason to boot the application first.
+        $name = null;
+        foreach (array_slice($arguments, 1) as $argument) {
+            if (is_string($argument) && !str_starts_with($argument, '--')) {
+                $name = $argument;
+                break;
+            }
+        }
+
+        if ($name === null) {
+            fwrite(STDERR, 'Which model? Try: pow make:model Note --fields=title:string,body:string' . PHP_EOL);
+            exit(1);
+        }
+
+        try {
+            $made = (new ModelMaker($root, static function (string $line): void {
+                echo $line . PHP_EOL;
+            }))->create(
+                $name,
+                table: $options['table'] ?? null,
+                fields: $options['fields'] ?? null,
+                force: isset($options['force']),
+            );
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+
+        printf(
+            "\n%s — table \"%s\", %d field%s\n",
+            $made->className,
+            $made->table,
+            count($made->fieldNames),
+            count($made->fieldNames) === 1 ? '' : 's',
+        );
+
+        // Not called automatically: Model::useConnection() is boot-time
+        // wiring, and this script does not edit app/bootstrap.php for the
+        // same reason make:controller does not edit app/routes.php.
+        echo PHP_EOL . 'Once, in app/bootstrap.php, right after $database is built:' . PHP_EOL . PHP_EOL;
+        echo '  use PhpOnWheels\Database\Model;' . PHP_EOL;
+        echo '  Model::useConnection($database);' . PHP_EOL;
+        echo PHP_EOL . 'Then use it directly — no injection, no registration:' . PHP_EOL . PHP_EOL;
+        echo '  ' . $made->importSnippet . PHP_EOL;
+        echo '  ' . $made->className . '::find($id);' . PHP_EOL;
+        exit(0);
+
+    case 'serve':
+        /** @var Application $app */
+        $app = require $bootstrap;
+
+        // Applying pending migrations is a development convenience of this
+        // command only. The production entrypoints never touch the schema:
+        // several workers booting at once would race to alter the same tables.
+        $migrator = $app->container()->get(Migrator::class);
+
+        if ($migrator->pending() !== []) {
+            fwrite(STDERR, 'Applying pending migrations...' . PHP_EOL);
+
+            foreach ($migrator->migrate() as $name) {
+                fwrite(STDERR, '  ' . $name . PHP_EOL);
+            }
+        }
+
+        $certificatePath = isset($options['https'])
+            ? DevelopmentCertificate::ensure($root . '/storage/certificates')
+            : null;
+
+        if ($certificatePath !== null) {
+            fwrite(STDERR, 'Using a self-signed development certificate; browsers will show a trust warning.' . PHP_EOL);
+        }
+
+        $server = new OnWheelsServer(
+            host: $options['host'] ?? '127.0.0.1',
+            port: (int) ($options['port'] ?? '8080'),
+            certificatePath: $certificatePath,
+        );
+
+        $server->run($app);
+        exit(0);
+
+    case 'ui':
+        // A second, self-contained application — never the one loaded from
+        // app/bootstrap.php. Its routes are never wired into app/routes.php
+        // either, so nothing here reaches a production deployment unless
+        // this command was actually run there, which is precisely the thing
+        // to avoid: see the warning below.
+        $host = $options['host'] ?? '127.0.0.1';
+
+        if (!in_array($host, ['127.0.0.1', 'localhost', '::1'], true)) {
+            fwrite(STDERR, sprintf(
+                'Warning: binding the admin UI to "%s" exposes it beyond this machine. '
+                . 'It has no login — anyone who can reach it can run migrations, resend '
+                . 'mail and clear the template cache.' . PHP_EOL,
+                $host,
+            ));
+        }
+
+        $admin = AdminApplication::boot($root);
+
+        fwrite(STDERR, 'Starting the admin UI — migrations, mail, routes, seeders, sessions, storage and generators.' . PHP_EOL);
+
+        $server = new OnWheelsServer(
+            host: $host,
+            port: (int) ($options['port'] ?? '8081'),
+        );
+
+        $server->run($admin);
+        exit(0);
+
+    case 'migrate':
+        /** @var Application $app */
+        $app = require $bootstrap;
+
+        $applied = $app->container()->get(Migrator::class)->migrate();
+
+        foreach ($applied as $name) {
+            echo 'Applied ' . $name . PHP_EOL;
+        }
+
+        if ($applied === []) {
+            echo 'Nothing to migrate.' . PHP_EOL;
+        }
+
+        exit(0);
+
+    case 'migrate:status':
+        /** @var Application $app */
+        $app = require $bootstrap;
+
+        $migrator = $app->container()->get(Migrator::class);
+        $batches = $migrator->batches();
+
+        foreach ($migrator->available() as $name) {
+            printf(
+                "%-10s %-40s %s\n",
+                isset($batches[$name]) ? 'applied' : 'pending',
+                $name,
+                isset($batches[$name]) ? 'batch ' . $batches[$name] : '',
+            );
+        }
+
+        exit(0);
+
+    case 'migrate:rollback':
+        /** @var Application $app */
+        $app = require $bootstrap;
+
+        $reversed = $app->container()->get(Migrator::class)
+            ->rollback((int) ($options['batches'] ?? '1'));
+
+        foreach ($reversed as $name) {
+            echo 'Reversed ' . $name . PHP_EOL;
+        }
+
+        if ($reversed === []) {
+            echo 'Nothing to roll back.' . PHP_EOL;
+        }
+
+        exit(0);
+
+    case 'db:seed':
+        foreach ($options as $option => $value) {
+            if (!in_array($option, ['seed', 'debug'], true)) {
+                throw new SeedFailed(sprintf('Onbekende optie "--%s" voor db:seed.', $option));
+            }
+        }
+
+        if (in_array('--seed', $arguments, true) || ($options['seed'] ?? null) === '') {
+            throw new SeedFailed('Geef een seedernaam op met --seed=naam.');
+        }
+
+        $name = $options['seed'] ?? null;
+        $seedOptions = 0;
+        foreach (array_slice($arguments, 1) as $argument) {
+            if (is_string($argument) && str_starts_with($argument, '--seed=')) {
+                $seedOptions++;
+                if ($seedOptions > 1) {
+                    throw new SeedFailed('Geef --seed slechts één keer op.');
+                }
+            }
+            if (is_string($argument) && !str_starts_with($argument, '--')) {
+                if ($name !== null) {
+                    throw new SeedFailed('Geef slechts één seedernaam op, als argument of met --seed=naam.');
+                }
+                $name = $argument;
+            }
+        }
+
+        /** @var Application $app */
+        $app = require $bootstrap;
+
+        $seeded = (new SeedRunner(
+            $app->container()->get(Connection::class),
+            $root . '/database/seeders',
+        ))->run($name);
+
+        foreach ($seeded as $name) {
+            echo 'Seeded ' . $name . PHP_EOL;
+        }
+
+        if ($seeded === []) {
+            echo 'Nothing to seed.' . PHP_EOL;
+        }
+
+        exit(0);
+
+    case 'mail:test':
+        /** @var Application $app */
+        $app = require $bootstrap;
+
+        $to = $options['to'] ?? null;
+
+        if ($to === null) {
+            fwrite(STDERR, 'Which address? Try: pow mail:test --to=you@example.test' . PHP_EOL);
+            exit(1);
+        }
+
+        $env = $app->container()->get(Environment::class);
+        $driver = $env->string('MAIL_DRIVER', 'array');
+        $queue = $env->bool('MAIL_QUEUE', false);
+        // Read directly rather than relying on the mailer's own default: only
+        // SmtpMailer applies one, and this command has to work the same way
+        // under every driver.
+        $from = $options['from'] ?? $env->raw('MAIL_FROM_ADDRESS');
+
+        if ($from === null || $from === '') {
+            fwrite(STDERR,
+                'No sender configured. Pass --from=you@example.test, or set '
+                . 'MAIL_FROM_ADDRESS in .env.' . PHP_EOL);
+            exit(1);
+        }
+
+        try {
+            $message = Message::to($to)
+                ->from($from)
+                ->subject('pow test message')
+                ->text($queue
+                    ? sprintf(
+                        "Queued by `pow mail:test` at %s, through the %s driver.\n\n"
+                        . "Run `pow mail:send-pending` to deliver this message.",
+                        gmdate('c'),
+                        $driver,
+                    )
+                    : sprintf(
+                        "Sent by `pow mail:test` at %s, through the %s driver.\n\n"
+                        . "If this arrived, MAIL_DRIVER=%s is delivering mail correctly.",
+                        gmdate('c'),
+                        $driver,
+                        $driver,
+                    ));
+        } catch (InvalidArgumentException $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+
+        try {
+            // Through PersistingMailer like any other send, so a test message
+            // is one more row in `pow mail:list` — and, if it fails,
+            // resendable with `pow mail:resend` once the problem is fixed.
+            $app->container()->get(PersistingMailer::class)->send($message);
+        } catch (MailFailed $e) {
+            fwrite(STDERR, sprintf('Send failed (driver: %s): %s', $driver, $e->getMessage()) . PHP_EOL);
+            exit(1);
+        }
+
+        if ($queue) {
+            printf("Queued for delivery to %s.\n", $to);
+        } elseif (in_array($driver, ['array', 'memory', 'null'], true)) {
+            printf(
+                "Accepted by the \"%s\" driver — nothing left this machine. "
+                . "Set MAIL_DRIVER=smtp to test real delivery.\n",
+                $driver,
+            );
+        } else {
+            printf("Sent to %s via %s.\n", $to, $driver);
+        }
+
+        exit(0);
+
+    case 'mail:list':
+        /** @var Application $app */
+        $app = require $bootstrap;
+
+        $status = null;
+
+        if (isset($options['status'])) {
+            $status = MailStatus::tryFrom($options['status']);
+
+            if ($status === null) {
+                fwrite(STDERR, sprintf(
+                    'Unknown status "%s". Use sent, failed or pending.',
+                    $options['status'],
+                ) . PHP_EOL);
+                exit(1);
+            }
+        }
+
+        $entries = $app->container()->get(PersistingMailer::class)
+            ->history($status, (int) ($options['limit'] ?? '20'));
+
+        if ($entries === []) {
+            echo 'No mail logged.' . PHP_EOL;
+            exit(0);
+        }
+
+        foreach ($entries as $entry) {
+            printf(
+                "%-5d %-7s %-4d %-34s %-40s %s\n",
+                $entry->id,
+                $entry->status->value,
+                $entry->attempts,
+                implode(', ', array_map(static fn ($address): string => $address->envelope(), $entry->to)),
+                mb_strimwidth($entry->subjectLine, 0, 40, '…'),
+                $entry->updatedAt,
+            );
+        }
+
+        exit(0);
+
+    case 'mail:send-pending':
+        /** @var Application $app */
+        $app = require $bootstrap;
+
+        $mailer = $app->container()->get(PersistingMailer::class);
+        $pending = $mailer->history(MailStatus::Pending, (int) ($options['limit'] ?? '50'));
+
+        if ($pending === []) {
+            echo 'Nothing pending to send.' . PHP_EOL;
+            exit(0);
+        }
+
+        $sent = 0;
+        $failed = 0;
+
+        foreach ($pending as $entry) {
+            try {
+                $mailer->deliverPending($entry->id);
+                printf("Sent #%d\n", $entry->id);
+                $sent++;
+            } catch (MailFailed $e) {
+                fwrite(STDERR, sprintf('Failed #%d: %s', $entry->id, $e->getMessage()) . PHP_EOL);
+                $failed++;
+            }
+        }
+
+        printf("%d sent, %d failed.\n", $sent, $failed);
+        exit($failed > 0 ? 1 : 0);
+
+    case 'mail:resend':
+        /** @var Application $app */
+        $app = require $bootstrap;
+
+        $mailer = $app->container()->get(PersistingMailer::class);
+
+        if (isset($options['failed'])) {
+            $failing = $mailer->history(MailStatus::Failed, (int) ($options['limit'] ?? '50'));
+
+            if ($failing === []) {
+                echo 'Nothing to resend.' . PHP_EOL;
+                exit(0);
+            }
+
+            $resent = 0;
+            $stillFailing = 0;
+
+            foreach ($failing as $entry) {
+                try {
+                    $mailer->resend($entry->id);
+                    printf("Resent #%d\n", $entry->id);
+                    $resent++;
+                } catch (MailFailed $e) {
+                    fwrite(STDERR, sprintf('Still failing #%d: %s', $entry->id, $e->getMessage()) . PHP_EOL);
+                    $stillFailing++;
+                }
+            }
+
+            printf("%d resent, %d still failing.\n", $resent, $stillFailing);
+            exit($stillFailing > 0 ? 1 : 0);
+        }
+
+        $id = null;
+        foreach (array_slice($arguments, 1) as $argument) {
+            if (is_string($argument) && !str_starts_with($argument, '--')) {
+                $id = $argument;
+                break;
+            }
+        }
+
+        if ($id === null || preg_match('/^\d+$/', $id) !== 1) {
+            fwrite(STDERR, 'Which mail? Try: pow mail:resend 12, or pow mail:resend --failed' . PHP_EOL);
+            exit(1);
+        }
+
+        try {
+            $entry = $mailer->resend((int) $id);
+        } catch (InvalidArgumentException | MailFailed $e) {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
+
+        printf(
+            "Resent #%d to %s.\n",
+            $entry->id,
+            implode(', ', array_map(static fn ($address): string => $address->envelope(), $entry->to)),
+        );
+        exit(0);
+
+    case 'cache:clear':
+        CacheFactory::fromEnvironment(Environment::load($root . '/.env'), $root)->clear();
+        echo 'Application cache cleared.' . PHP_EOL;
+        exit(0);
+
+    case 'storage:clear':
+        // No reason to boot the application: the cache directory is a fixed
+        // convention (storage/cache/views), not something configuration
+        // changes. Safe to run at any time — TemplateEngine recompiles a
+        // template the moment it finds no compiled file waiting for it, so
+        // the very next render replaces whatever this deletes.
+        $directory = $root . '/storage/cache/views';
+        $removed = 0;
+
+        foreach (glob($directory . '/*') ?: [] as $file) {
+            if (is_file($file) && @unlink($file)) {
+                $removed++;
+            }
+        }
+
+        printf("Removed %d compiled template%s.\n", $removed, $removed === 1 ? '' : 's');
+        exit(0);
+
+    case 'sessions:gc':
+        // No reason to boot the application: the session directory is a fixed
+        // convention (storage/sessions), not something configuration changes,
+        // and garbage collection is pure filesystem work.
+        $removed = (new FileSessionStore($root . '/storage/sessions'))->collectGarbage();
+
+        printf("Removed %d expired session%s.\n", $removed, $removed === 1 ? '' : 's');
+        exit(0);
+
+    case 'routes':
+        /** @var Application $app */
+        $app = require $bootstrap;
+
+        $rows = [];
+        foreach ($app->router()->routes() as $route) {
+            $rows[] = [$route->method->value, $route->pattern, $route->name ?? ''];
+        }
+
+        usort($rows, static fn (array $a, array $b): int => [$a[1], $a[0]] <=> [$b[1], $b[0]]);
+
+        foreach ($rows as [$method, $pattern, $name]) {
+            printf("%-7s %-40s %s\n", $method, $pattern, $name);
+        }
+
+        exit(0);
+
+    case 'help':
+        echo $usage;
+        exit(0);
+
+    default:
+        fwrite(STDERR, sprintf('Unknown command "%s".', $command) . PHP_EOL . PHP_EOL . $usage);
+        exit(1);
+    }
+} catch (CacheFailed $e) {
+    fwrite(STDERR, 'Cache error: ' . $e->getMessage() . PHP_EOL);
+    exit(1);
+} catch (InvalidEnvFile | MissingConfiguration | ConnectionFailed $e) {
+    // A configuration mistake is the user's to fix, not a crash to debug: show
+    // the message plainly rather than a stack trace through the container.
+    fwrite(STDERR, 'Configuration error: ' . $e->getMessage() . PHP_EOL);
+    exit(1);
+} catch (SeedFailed $e) {
+    fwrite(STDERR, 'Seeding error: ' . $e->getMessage() . PHP_EOL);
+    exit(1);
+} catch (InvalidRoutePattern $e) {
+    // Same reasoning as the configuration errors above: a route that fails to
+    // compile at boot is the user's app/routes.php or autoloader to fix, not
+    // a framework crash to debug through a stack trace.
+    fwrite(STDERR, 'Routing error: ' . $e->getMessage() . PHP_EOL);
+    exit(1);
+}

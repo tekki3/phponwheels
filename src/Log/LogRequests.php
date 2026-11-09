@@ -1,0 +1,66 @@
+<?php
+
+declare(strict_types=1);
+
+namespace PhpOnWheels\Log;
+
+use Closure;
+use PhpOnWheels\Container\RequestScope;
+use PhpOnWheels\Http\Response;
+use PhpOnWheels\Http\ServerRequest;
+use PhpOnWheels\Middleware\Middleware;
+use Throwable;
+
+/**
+ * Logs one line per request, including those that threw.
+ *
+ * Registered outermost so its timing covers every other layer. The query
+ * string is deliberately omitted: it routinely carries tokens and search terms
+ * that should not be duplicated into logs.
+ */
+final class LogRequests implements Middleware
+{
+    public function __construct(
+        private readonly Logger $logger,
+    ) {
+    }
+
+    public function process(ServerRequest $request, RequestScope $scope, Closure $next): Response
+    {
+        $started = hrtime(true);
+        $requestId = bin2hex(random_bytes(16));
+        $logger = new ContextLogger($this->logger, ['request_id' => $requestId]);
+        $scope->provide(Logger::class, $logger);
+
+        try {
+            $response = $next($request);
+        } catch (Throwable $e) {
+            $logger->log(Level::Error, 'request failed', [
+                'method' => $request->method->value,
+                'path' => $request->uri->path,
+                'exception' => $e::class,
+                'duration_ms' => $this->elapsedMs($started),
+            ]);
+
+            throw $e;
+        }
+
+        $logger->log(
+            $response->status->value >= 500 ? Level::Error : Level::Info,
+            'request handled',
+            [
+                'method' => $request->method->value,
+                'path' => $request->uri->path,
+                'status' => $response->status->value,
+                'duration_ms' => $this->elapsedMs($started),
+            ],
+        );
+
+        return $response->withHeader('X-Request-ID', $requestId);
+    }
+
+    private function elapsedMs(int $startedAt): float
+    {
+        return round((hrtime(true) - $startedAt) / 1_000_000, 3);
+    }
+}
