@@ -2,11 +2,6 @@
 
 @section('content')
 <div class="prose">
-    {# An auth screen is where identity matters most, so the mark gets room
-       here rather than only in the masthead. Decorative: the heading below
-       already says what this page is. #}
-    <img class="signin-mark" src="/assets/brand/phponwheels-mark.svg" alt="" width="64" height="64">
-
     <h1>Sign in</h1>
 
     @if($notice)

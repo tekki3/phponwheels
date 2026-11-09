@@ -145,6 +145,26 @@ final class DriverTest extends TestCase
         self::assertFalse(Driver::SqlServer->supportsEmulatedPreparesOption());
     }
 
+    public function test_table_discovery_uses_the_current_database_or_schema(): void
+    {
+        self::assertSame(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = :name",
+            Driver::Sqlite->tableExistsSql(),
+        );
+        self::assertSame(
+            'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :name',
+            Driver::MySql->tableExistsSql(),
+        );
+        self::assertSame(
+            'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = :name',
+            Driver::PostgreSql->tableExistsSql(),
+        );
+        self::assertSame(
+            "SELECT COUNT(*) FROM sys.tables WHERE object_id = OBJECT_ID(:name, N'U')",
+            Driver::SqlServer->tableExistsSql(),
+        );
+    }
+
     // --- settings -------------------------------------------------------------
 
     public function test_it_builds_a_dsn_for_each_engine(): void

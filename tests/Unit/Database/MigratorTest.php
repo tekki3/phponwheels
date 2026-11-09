@@ -68,6 +68,56 @@ final class MigratorTest extends TestCase
         self::assertSame(['0002_create_posts'], $migrator->pending());
     }
 
+    public function test_legacy_history_is_preserved_without_reapplying_schema(): void
+    {
+        $this->write('0001_create_users', 'users');
+        $this->migrator()->migrate();
+        $history = $this->db->select('SELECT * FROM ' . Migrator::LEDGER_TABLE);
+        $this->db->executeSchema('ALTER TABLE ' . Migrator::LEDGER_TABLE . ' RENAME TO orbit_migrations');
+
+        $migrator = $this->migrator();
+        self::assertSame([], $migrator->migrate());
+        self::assertSame($history, $this->db->select('SELECT * FROM ' . Migrator::LEDGER_TABLE));
+        self::assertSame(0, $this->db->selectValue('SELECT COUNT(*) FROM orbit_migrations'));
+        self::assertTrue($this->tableExists('users'));
+
+        $this->write('0002_create_posts', 'posts');
+        self::assertSame(['0002_create_posts'], $migrator->migrate());
+        self::assertSame(['0001_create_users' => 1, '0002_create_posts' => 2], $migrator->batches());
+        self::assertSame(['0002_create_posts'], $migrator->rollback());
+        self::assertSame(['0001_create_users'], $migrator->rollback());
+        self::assertSame([], $migrator->applied(), 'rolled-back legacy entries must not be imported again');
+    }
+
+    public function test_legacy_history_is_imported_when_the_new_ledger_already_exists_but_is_empty(): void
+    {
+        $this->write('0001_create_users', 'users');
+        $this->migrator()->migrate();
+        $this->db->executeSchema('CREATE TABLE orbit_migrations AS SELECT * FROM ' . Migrator::LEDGER_TABLE);
+        $this->db->execute('DELETE FROM ' . Migrator::LEDGER_TABLE);
+
+        self::assertSame([], $this->migrator()->migrate());
+        self::assertSame(['0001_create_users'], $this->migrator()->applied());
+    }
+
+    public function test_two_populated_ledgers_are_rejected_without_changing_history(): void
+    {
+        $this->write('0001_create_users', 'users');
+        $this->migrator()->migrate();
+        $this->db->executeSchema('CREATE TABLE orbit_migrations AS SELECT * FROM ' . Migrator::LEDGER_TABLE);
+
+        try {
+            $this->migrator()->migrate();
+            self::fail('two populated ledgers must not be silently merged');
+        } catch (MigrationFailed $e) {
+            self::assertStringContainsString('Reconcile the migration ledgers', $e->getMessage());
+        }
+
+        self::assertSame(1, $this->db->selectValue('SELECT COUNT(*) FROM orbit_migrations'));
+        self::assertSame(1, $this->db->selectValue('SELECT COUNT(*) FROM ' . Migrator::LEDGER_TABLE));
+        self::assertTrue($this->tableExists('users'));
+    }
+
     /**
      * A failure must leave neither schema changes nor a ledger entry, so the
      * migration can be fixed and re-run.

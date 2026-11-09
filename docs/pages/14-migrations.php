@@ -73,6 +73,8 @@ $ ./pow migrate:rollback --batches=2
 
 <p><code>./pow serve</code> applies pending migrations first, as a development convenience. <strong>The production entrypoints never touch the schema</strong> — several workers booting at once would race. Run <code>./pow migrate</code> as a deploy step.</p>
 
+<p>Upgrading from the former Orbit name preserves migration history: when the new <code>phponwheels_migrations</code> ledger is empty, the migrator transactionally moves records from <code>orbit_migrations</code>, retaining batch numbers and timestamps without rerunning schema changes. The old ledger is left empty so rollbacks cannot resurrect imported records. If both ledgers contain history, migration stops for manual reconciliation rather than guessing which is authoritative. Back up your database before upgrading; do not delete existing tables to resolve a ledger mismatch.</p>
+
 <h2>Batches</h2>
 
 <p>Everything applied by one <code>migrate</code> run shares a batch number. A rollback reverses the most recent batch — one deployment's worth of changes — rather than one arbitrary step.</p>

@@ -136,6 +136,19 @@ enum Driver: string
     }
 
     /**
+     * Checks the current database/schema for a table, binding its name as :name.
+     */
+    public function tableExistsSql(): string
+    {
+        return match ($this) {
+            self::Sqlite => "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = :name",
+            self::MySql => 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :name',
+            self::PostgreSql => 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = :name',
+            self::SqlServer => "SELECT COUNT(*) FROM sys.tables WHERE object_id = OBJECT_ID(:name, N'U')",
+        };
+    }
+
+    /**
      * How to page past rows without capping the result.
      *
      * PostgreSQL accepts a bare OFFSET. SQLite and MySQL require a LIMIT

@@ -22,9 +22,9 @@
     <meta property="og:site_name" content="phponwheels">
     <meta property="og:title" content="{{ $title }}">
     <meta property="og:description" content="A safe PHP framework that runs on itself.">
-    <meta property="og:image" content="{{ $appUrl }}/assets/brand/social-card.png">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
+    <meta property="og:image" content="{{ $appUrl }}/assets/img/logo-1.png">
+    <meta property="og:image:width" content="1274">
+    <meta property="og:image:height" content="625">
     <meta name="twitter:card" content="summary_large_image">
 
     <link rel="stylesheet" href="/assets/app.css">
@@ -33,14 +33,9 @@
 <a class="skip" href="#content">Skip to content</a>
 
 <header class="masthead">
-    {# The lockup carries the name, so the link needs no separate text. The
-       wordmark is a fixed colour, so the page picks the variant that contrasts
-       with the reader's theme. #}
+    {# The lockup carries the name, so the link needs no separate text. #}
     <a class="brand" href="/">
-        <picture>
-            <source srcset="/assets/brand/phponwheels-logo-on-dark.svg" media="(prefers-color-scheme: dark)">
-            <img src="/assets/brand/phponwheels-logo-on-light.svg" alt="phponwheels" width="127" height="26">
-        </picture>
+        <img src="/assets/img/logo-all.png" alt="phponwheels" width="1152" height="768">
     </a>
 
     <nav>

@@ -101,8 +101,14 @@ a:focus-visible, .brand:focus-visible {
     overflow-y: auto;
 }
 
-.brand { display: block; }
-.brand img { display: block; height: 32px; width: auto; }
+.brand {
+    display: block;
+    width: max-content;
+    padding: .35rem;
+    border-radius: 6px;
+    background: #fff;
+}
+.brand img { display: block; height: 72px; width: auto; }
 .tagline {
     margin: .6rem 0 1.75rem;
     color: var(--muted);

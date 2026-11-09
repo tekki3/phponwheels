@@ -60,6 +60,38 @@ final class Migrator
                 applied_at VARCHAR(40) NOT NULL
             ',
         ));
+
+        $this->importLegacyLedger();
+    }
+
+    private function importLegacyLedger(): void
+    {
+        if ((int) $this->database->selectValue(
+            $this->database->driver()->tableExistsSql(),
+            ['name' => 'orbit_migrations'],
+        ) === 0) {
+            return;
+        }
+
+        $this->database->transaction(static function (Connection $database): void {
+            if ((int) $database->selectValue('SELECT COUNT(*) FROM orbit_migrations') === 0) {
+                return;
+            }
+
+            if ((int) $database->selectValue('SELECT COUNT(*) FROM ' . self::LEDGER_TABLE) !== 0) {
+                throw new MigrationFailed(
+                    'Both orbit_migrations and phponwheels_migrations contain history. '
+                    . 'Reconcile the migration ledgers before continuing; no history was changed.',
+                );
+            }
+
+            $database->execute(
+                'INSERT INTO ' . self::LEDGER_TABLE . ' (name, batch, applied_at) '
+                . 'SELECT name, batch, applied_at FROM orbit_migrations',
+            );
+            // Move, rather than copy: stale legacy rows would resurrect rolled-back migrations.
+            $database->execute('DELETE FROM orbit_migrations');
+        });
     }
 
     /**

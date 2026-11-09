@@ -141,7 +141,7 @@ $templates = new TemplateEngine(
 [[/php]]
 
 [[html]]
-<meta property="og:image" content="{{ $appUrl }}/assets/brand/social-card.png">
+<meta property="og:image" content="{{ $appUrl }}/assets/img/logo-1.png">
 <footer>Served by {{ $sapi }} on PHP {{ $phpVersion }}.</footer>
 [[/html]]
 

@@ -289,10 +289,7 @@ function layout(array $page, array $meta): string
         <div class="shell">
         <aside class="sidebar">
             <a class="brand" href="index.html">
-                <picture>
-                    <source srcset="assets/logo-on-dark.svg" media="(prefers-color-scheme: dark)">
-                    <img src="assets/logo-on-light.svg" alt="phponwheels" width="157" height="32">
-                </picture>
+                <img src="assets/logo-all.png" alt="phponwheels" width="1152" height="768">
             </a>
             <p class="tagline">Developer documentation</p>
             <nav aria-label="Documentation">{$nav}</nav>
@@ -356,6 +353,7 @@ if ($missing !== []) {
 // moved or served on its own.
 foreach ([
     __DIR__ . '/../public/favicon.svg' => OUT . '/assets/favicon.svg',
+    __DIR__ . '/../public/assets/img/logo-all.png' => OUT . '/assets/logo-all.png',
     // Both variants: the wordmark is a fixed colour, so the page picks the one
     // that contrasts with the reader's theme.
     __DIR__ . '/../brand/phponwheels-logo-on-dark.svg' => OUT . '/assets/logo-on-dark.svg',
